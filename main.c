@@ -1,0 +1,71 @@
+#include "fullercode.h"
+
+#include <stdio.h>
+#include <math.h>
+#include <string.h>
+
+/* Haversine distance in metres between two lat/lon points. */
+static double haversine_m(double lat1, double lon1, double lat2, double lon2) {
+    const double R = 6371010.0;
+    const double to_rad = 3.14159265358979323846 / 180.0;
+    double dlat = (lat2 - lat1) * to_rad;
+    double dlon = (lon2 - lon1) * to_rad;
+    double a = sin(dlat/2)*sin(dlat/2)
+             + cos(lat1*to_rad)*cos(lat2*to_rad)*sin(dlon/2)*sin(dlon/2);
+    return 2.0 * R * asin(sqrt(a));
+}
+
+static void run_test(const char *label, double lat, double lon, int len) {
+    char code[32];
+    double dec_lat, dec_lon;
+
+    if (fullergeocoding(lat, lon, (unsigned short)len, code) != 0) {
+        printf("%-30s  ENCODE ERROR\n", label);
+        return;
+    }
+    if (fullergeodecoding(code, &dec_lat, &dec_lon) != 0) {
+        printf("%-30s  code=%-14s  DECODE ERROR\n", label, code);
+        return;
+    }
+    double err_m = haversine_m(lat, lon, dec_lat, dec_lon);
+    printf("%-30s  code=%-14s  decoded=(%.6f, %.6f)  err=%.1f m\n",
+           label, code, dec_lat, dec_lon, err_m);
+}
+
+int main(void) {
+    printf("=== fullercode geocoding tests ===\n\n");
+
+    /* Basic round-trip for well-known locations */
+    run_test("Paris (6 chars)",         48.8566,   2.3522,   6);
+    run_test("Paris (10 chars)",        48.8566,   2.3522,  10);
+    run_test("Paris (12 chars)",        48.8566,   2.3522,  12);
+    run_test("New York (8 chars)",      40.7128,  -74.0060,  8);
+    run_test("Tokyo (8 chars)",         35.6895,  139.6917,  8);
+    run_test("Sydney (8 chars)",       -33.8688,  151.2093,  8);
+    run_test("North Pole (6 chars)",    90.0,       0.0,     6);
+    run_test("South Pole (6 chars)",   -90.0,       0.0,     6);
+    run_test("Null Island (6 chars)",    0.0,       0.0,     6);
+    run_test("Antimeridian E (6 c)",     0.0,     180.0,     6);
+    run_test("Antimeridian W (6 c)",     0.0,    -180.0,     6);
+
+    /* Decode-only test of a known code */
+    printf("\n=== decode only ===\n");
+    const char *known_codes[] = { "C", "CM", "CM3", "CM3F", "CM3FA2", NULL };
+    for (int i = 0; known_codes[i]; i++) {
+        double lat, lon;
+        if (fullergeodecoding(known_codes[i], &lat, &lon) == 0)
+            printf("  decode(\"%s\") -> (%.6f, %.6f)\n", known_codes[i], lat, lon);
+        else
+            printf("  decode(\"%s\") -> ERROR\n", known_codes[i]);
+    }
+
+    /* Error cases */
+    printf("\n=== error cases ===\n");
+    char buf[32];
+    printf("  encode len=0:  %d (expected -1)\n", fullergeocoding(0,0,0,buf));
+    printf("  encode lat>90: %d (expected -1)\n", fullergeocoding(91,0,6,buf));
+    printf("  decode \"\": %d (expected -1)\n",   fullergeodecoding("", &(double){0}, &(double){0}));
+    printf("  decode \"?\": %d (expected -1)\n",  fullergeodecoding("?", &(double){0}, &(double){0}));
+
+    return 0;
+}
