@@ -54,4 +54,19 @@ int fullerNATOdecoding(const char *code, double *lat_deg, double *lon_deg);
  */
 int fullergeodecoding(const char *code, double *lat_deg, double *lon_deg);
 
+/*
+ * fullerbingeocoding - encode coordinates to a 64-bit binary format.
+ * Returns the 64-bit code, or 0 on error (invalid coordinates).
+ */
+uint64_t fullerbingeocoding(double lat_deg, double lon_deg);
+
+/*
+ * fullerbingeodecoding - decode from a 64-bit binary format.
+ * bin     : 64-bit fullercode
+ * lat_deg : output latitude
+ * lon_deg : output longitude
+ * Returns 0 on success, -1 on invalid face ID.
+ */
+int fullerbingeodecoding(uint64_t bin, double *lat_deg, double *lon_deg);
+
 #endif /* FULLERCODE_H */
