@@ -32,6 +32,23 @@ static void run_test(const char *label, double lat, double lon, int len) {
            label, code, dec_lat, dec_lon, err_m);
 }
 
+static void run_NATO_test(const char *label, double lat, double lon) {
+    char code[32];
+    double dec_lat, dec_lon;
+
+    if (fullerNATOcoding(lat, lon, code) != 0) {
+        printf("%-30s  ENCODE ERROR\n", label);
+        return;
+    }
+    if (fullergeodecoding(code, &dec_lat, &dec_lon) != 0) {
+        printf("%-30s  code=%-14s  DECODE ERROR\n", label, code);
+        return;
+    }
+    double err_m = haversine_m(lat, lon, dec_lat, dec_lon);
+    printf("%-30s  code=%-14s  decoded=(%.6f, %.6f)  err=%.1f m\n",
+           label, code, dec_lat, dec_lon, err_m);
+}
+
 int main(void) {
     printf("=== fullercode geocoding tests ===\n\n");
 
@@ -48,6 +65,21 @@ int main(void) {
     run_test("Antimeridian E (6 c)",     0.0,     180.0,     6);
     run_test("Antimeridian W (6 c)",     0.0,    -180.0,     6);
 
+    /* NATO encoding smoke test */
+    printf("\n=== NATO smoke test ===\n");
+    {
+        char nato_code[8];
+        if (fullerNATOcoding(48.8566, 2.3522, nato_code) == 0) {
+            printf("  NATO Paris -> %s\n", nato_code);
+        } else {
+            printf("  NATO Paris -> ERROR\n");
+        }
+    }
+    run_NATO_test("Paris (11 chars)",        48.8566,   2.3522,  12);
+    run_NATO_test("New York",      40.7128,  -74.0060,  8);
+    run_NATO_test("Tokyo",         35.6895,  139.6917,  8);
+    run_NATO_test("Sydney",       -33.8688,  151.2093,  8);
+    run_NATO_test("North Pole",    90.0,       0.0,     6);
     /* Decode-only test of a known code */
     printf("\n=== decode only ===\n");
     const char *known_codes[] = { "C", "CM", "CM3", "CM3F", "CM3FA2", NULL };

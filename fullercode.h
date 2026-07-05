@@ -21,6 +21,28 @@
 int fullergeocoding(double lat_deg, double lon_deg, uint16_t len, char *out);
 
 /*
+ * fullerNATOcoding - encode geographic coordinates to a 7-character NATO fullercode.
+ *
+ * lat_deg : latitude in decimal degrees  [-90, 90]
+ * lon_deg : longitude in decimal degrees [-180, 180]
+ * out     : caller-supplied buffer of at least 8 bytes
+ *
+ * Returns 0 on success, -1 on invalid input.
+ */
+int fullerNATOcoding(double lat_deg, double lon_deg, char *out);
+
+/*
+ * fullerNATOdecoding - decode a NATO fullercode string to geographic coordinates.
+ *
+ * code    : null-terminated NATO fullercode string (1–11 characters)
+ * lat_deg : output latitude in decimal degrees
+ * lon_deg : output longitude in decimal degrees
+ *
+ * Returns 0 on success, -1 on invalid code.
+ */
+int fullerNATOdecoding(const char *code, double *lat_deg, double *lon_deg);
+
+/*
  * fullergeodecoding - decode a fullercode string to geographic coordinates.
  *
  * code    : null-terminated fullercode string (1–20 characters)

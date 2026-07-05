@@ -99,7 +99,28 @@ static const IcoFace ICO_FACES[20] = {
     {'8', {8,10,9},  "CRT8V9XP5H2AF3M7"},
     {'2', {8,12,11}, "C2AF3M7RT8V9XP5H"},
 };
-
+static const IcoFace ICO_FACES_NATO[20] = {
+    {'P', {2,5,6},   "CWPXGVBTRYMEFAZH"},
+    {'M', {2,4,5},   "CAZHWPXGVBTRYMEF"},
+    {'X', {2,3,4},   "CMEFAZHWPXGVBTRY"},
+    {'C', {2,1,3},   "CTRYMEFAZHWPXGVB"},
+    {'N', {2,6,1},   "CGVBTRYMEFAZHWPX"},
+    {'V', {12,4,3},  "CZAFEMYRTBVGXPWH"},
+    {'W', {4,12,7},  "CAZHWPXGVBTRYMEF"},
+    {'F', {7,5,4},   "CPWHZAFEMYRTBVGX"},
+    {'S', {8,7,12},  "CPWHZAFEMYRTBVGX"},
+    {'A', {5,7,9},   "CWPXGVBTRYMEFAZH"},
+    {'J', {1,10,11}, "CTRYMEFAZHWPXGVB"},
+    {'G', {6,9,10},  "CGVBTRYMEFAZHWPX"},
+    {'H', {9,6,5},   "CVGXPWHZAFEMYRTB"},
+    {'R', {8,9,7},   "CVGXPWHZAFEMYRTB"},
+    {'E', {3,11,12}, "CMEFAZHWPXGVBTRY"},
+    {'T', {11,3,1},  "CEMYRTBVGXPWHZAF"},
+    {'K', {8,11,10}, "CEMYRTBVGXPWHZAF"},
+    {'Y', {10,1,6},  "CRTBVGXPWHZAFEMY"},
+    {'B', {8,10,9},  "CRTBVGXPWHZAFEMY"},
+    {'Z', {8,12,11}, "CZAFEMYRTBVGXPWH"},
+};
 /* ── Face state ─────────────────────────────────────────────────────────── */
 
 /*
@@ -310,13 +331,13 @@ static int find_sub2d(double *Xc, double *Yc) {
 
 /* ── Closest initial face ───────────────────────────────────────────────── */
 
-static int find_closest_ico_face(Vec3 q) {
+static int find_closest_ico_face(Vec3 q, const IcoFace *faces) {
     double min_dsq = 1e300;
     int best = 0, i;
     for (i = 0; i < 20; i++) {
-        Vec3 v0  = ico_vert(ICO_FACES[i].v[0]);
-        Vec3 v1  = ico_vert(ICO_FACES[i].v[1]);
-        Vec3 v2  = ico_vert(ICO_FACES[i].v[2]);
+        Vec3 v0  = ico_vert(faces[i].v[0]);
+        Vec3 v1  = ico_vert(faces[i].v[1]);
+        Vec3 v2  = ico_vert(faces[i].v[2]);
         Vec3 ctr = sph_center(v0, v1, v2);
         double dx = q.x - ctr.x, dy = q.y - ctr.y, dz = q.z - ctr.z;
         double d  = dx*dx + dy*dy + dz*dz;
@@ -325,16 +346,14 @@ static int find_closest_ico_face(Vec3 q) {
     return best;
 }
 
-/* ── Public API ─────────────────────────────────────────────────────────── */
-
-int fullergeocoding(double lat_deg, double lon_deg, uint16_t len, char *out) {
+static int encode_with_faces(double lat_deg, double lon_deg, uint16_t len, char *out, const IcoFace *faces) {
     double lat, lon, cos_lat;
     Vec3 q;
     int fi, i;
     Face f;
     double Xc, Yc;
 
-    if (!out || len < 1 || len > MAX_LEN) return -1;
+    if (!out || !faces || len < 1 || len > MAX_LEN) return -1;
     if (lat_deg < -90.0 || lat_deg > 90.0) return -1;
     if (lon_deg < -180.0 || lon_deg > 180.0) return -1;
 
@@ -346,17 +365,17 @@ int fullergeocoding(double lat_deg, double lon_deg, uint16_t len, char *out) {
     q.y = cos_lat * sin(lon) * RADIUS;
     q.z = sin(lat)           * RADIUS;
 
-    fi = find_closest_ico_face(q);
+    fi = find_closest_ico_face(q, faces);
 
-    f.verts[0] = ico_vert(ICO_FACES[fi].v[0]);
-    f.verts[1] = ico_vert(ICO_FACES[fi].v[1]);
-    f.verts[2] = ico_vert(ICO_FACES[fi].v[2]);
-    memcpy(f.stids, ICO_FACES[fi].stids, 17);
+    f.verts[0] = ico_vert(faces[fi].v[0]);
+    f.verts[1] = ico_vert(faces[fi].v[1]);
+    f.verts[2] = ico_vert(faces[fi].v[2]);
+    memcpy(f.stids, faces[fi].stids, 17);
     f.up    = 1;
     f.depth = 0;
     f.ready = 0;
 
-    out[0] = ICO_FACES[fi].id;
+    out[0] = faces[fi].id;
 
     Xc = 0.0; Yc = 0.0;
 
@@ -382,7 +401,18 @@ int fullergeocoding(double lat_deg, double lon_deg, uint16_t len, char *out) {
     return 0;
 }
 
-int fullergeodecoding(const char *code, double *lat_deg, double *lon_deg) {
+/* ── Public API ─────────────────────────────────────────────────────────── */
+
+int fullergeocoding(double lat_deg, double lon_deg, uint16_t len, char *out) {
+    return encode_with_faces(lat_deg, lon_deg, len, out, ICO_FACES);
+}
+
+int fullerNATOcoding(double lat_deg, double lon_deg, char *out) {
+    return encode_with_faces(lat_deg, lon_deg, 11, out, ICO_FACES_NATO);
+}
+
+
+static int decode_with_faces(const char *code, double *lat_deg, double *lon_deg, const IcoFace *faces, int max_len) {
     int n, fi, i, k;
     Face f;
     Vec3 ctr;
@@ -391,19 +421,19 @@ int fullergeodecoding(const char *code, double *lat_deg, double *lon_deg) {
     if (!code || !lat_deg || !lon_deg) return -1;
 
     n = (int)strlen(code);
-    if (n < 1 || n > MAX_LEN) return -1;
+    if (n < 1 || n > max_len) return -1;
 
     /* Locate initial icosahedron face. */
     fi = -1;
     for (i = 0; i < 20; i++) {
-        if (ICO_FACES[i].id == code[0]) { fi = i; break; }
+        if (faces[i].id == code[0]) { fi = i; break; }
     }
     if (fi < 0) return -1;
 
-    f.verts[0] = ico_vert(ICO_FACES[fi].v[0]);
-    f.verts[1] = ico_vert(ICO_FACES[fi].v[1]);
-    f.verts[2] = ico_vert(ICO_FACES[fi].v[2]);
-    memcpy(f.stids, ICO_FACES[fi].stids, 17);
+    f.verts[0] = ico_vert(faces[fi].v[0]);
+    f.verts[1] = ico_vert(faces[fi].v[1]);
+    f.verts[2] = ico_vert(faces[fi].v[2]);
+    memcpy(f.stids, faces[fi].stids, 17);
     f.up    = 1;
     f.depth = 0;
     f.ready = 0;
@@ -430,4 +460,12 @@ int fullergeodecoding(const char *code, double *lat_deg, double *lon_deg) {
     *lon_deg = atan2(ctr.y, ctr.x)       * (180.0 / M_PI);
 
     return 0;
+}
+
+int fullerNATOdecoding(const char *code, double *lat_deg, double *lon_deg) {
+    return decode_with_faces(code, lat_deg, lon_deg, ICO_FACES_NATO, 11);
+}
+
+int fullergeodecoding(const char *code, double *lat_deg, double *lon_deg) {
+    return decode_with_faces(code, lat_deg, lon_deg, ICO_FACES, MAX_LEN);
 }
