@@ -4,7 +4,7 @@
 #include <string.h>
 
 #define RADIUS     6371010.0
-#define TRANSITION 11    /* levels 0..(TRANSITION-1) use 3D cross-product tests;
+#define TRANSITION 18    /* levels 0..(TRANSITION-1) use 3D cross-product tests;
                             level TRANSITION and above use 2D barycentric subdivision */
 #define MAX_LEN    20    /* practical precision limit (beyond ~15 float64 noise dominates) */
 
@@ -121,6 +121,10 @@ static const IcoFace ICO_FACES_NATO[20] = {
     {'B', {8,10,9},  "CRTBVGXPWHZAFEMY"},
     {'Z', {8,12,11}, "CZAFEMYRTBVGXPWH"},
 };
+
+/* Binary face mapping order: M=0x10, X=0x11, ... S=0x23 */
+static const char BIN_FACE_ORDER[] = "MXCNPFVT7H53J9A2KR8S";
+
 /* ── Face state ─────────────────────────────────────────────────────────── */
 
 /*
@@ -468,4 +472,87 @@ int fullerNATOdecoding(const char *code, double *lat_deg, double *lon_deg) {
 
 int fullergeodecoding(const char *code, double *lat_deg, double *lon_deg) {
     return decode_with_faces(code, lat_deg, lon_deg, ICO_FACES, MAX_LEN);
+}
+
+uint64_t fullerbingeocoding(double lat_deg, double lon_deg) {
+    double lat, lon, cos_lat;
+    Vec3 q;
+    int fi, i, bin_face = -1;
+    Face f;
+    uint64_t result = 0;
+
+    if (lat_deg < -90.0 || lat_deg > 90.0) return 0;
+    if (lon_deg < -180.0 || lon_deg > 180.0) return 0;
+
+    lat = lat_deg * (M_PI / 180.0);
+    lon = lon_deg * (M_PI / 180.0);
+    cos_lat = cos(lat);
+    q.x = cos_lat * cos(lon) * RADIUS;
+    q.y = cos_lat * sin(lon) * RADIUS;
+    q.z = sin(lat) * RADIUS;
+
+    fi = find_closest_ico_face(q, ICO_FACES);
+    char id = ICO_FACES[fi].id;
+    for (i = 0; i < 20; i++) {
+        if (BIN_FACE_ORDER[i] == id) { bin_face = 0x10 + i; break; }
+    }
+    
+    if (bin_face == -1) return 0;
+
+    result = (uint64_t)bin_face << 56;
+
+    f.verts[0] = ico_vert(ICO_FACES[fi].v[0]);
+    f.verts[1] = ico_vert(ICO_FACES[fi].v[1]);
+    f.verts[2] = ico_vert(ICO_FACES[fi].v[2]);
+    memcpy(f.stids, ICO_FACES[fi].stids, 17);
+    f.up = 1; f.depth = 0; f.ready = 0;
+
+    for (i = 0; i < 14; i++) {
+        face_subdivide(&f);
+        int idx = find_sub3d(&f, q);
+        result |= (uint64_t)idx << (52 - (i * 4));
+        f = make_subface(&f, idx);
+    }
+
+    return result;
+}
+
+int fullerbingeodecoding(uint64_t bin, double *lat_deg, double *lon_deg) {
+    int i, fi = -1;
+    Face f;
+    Vec3 ctr;
+    double radius;
+
+    if (!lat_deg || !lon_deg) return -1;
+
+    int bin_face = (int)((bin >> 56) & 0xFF);
+    int order_idx = bin_face - 0x10;
+    if (order_idx < 0 || order_idx >= 20) return -1;
+
+    char target_id = BIN_FACE_ORDER[order_idx];
+    for (i = 0; i < 20; i++) {
+        if (ICO_FACES[i].id == target_id) { fi = i; break; }
+    }
+    if (fi == -1) return -1;
+
+    f.verts[0] = ico_vert(ICO_FACES[fi].v[0]);
+    f.verts[1] = ico_vert(ICO_FACES[fi].v[1]);
+    f.verts[2] = ico_vert(ICO_FACES[fi].v[2]);
+    memcpy(f.stids, ICO_FACES[fi].stids, 17);
+    f.up = 1; f.depth = 0; f.ready = 0;
+
+    for (i = 0; i < 14; i++) {
+        int idx = (int)((bin >> (52 - (i * 4))) & 0x0F);
+        face_subdivide(&f);
+        /* Note: SF_VERTS table provides vertex indices for sub-triangles */
+        f = make_subface(&f, idx);
+    }
+
+    ctr = sph_center(f.verts[0], f.verts[1], f.verts[2]);
+    radius = sqrt(ctr.x * ctr.x + ctr.y * ctr.y + ctr.z * ctr.z);
+
+    *lat_deg = asin(ctr.z / radius) * (180.0 / M_PI);
+    *lon_deg = atan2(ctr.y, ctr.x) * (180.0 / M_PI);
+
+    return 0;
 }
