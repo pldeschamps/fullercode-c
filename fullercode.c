@@ -1,6 +1,7 @@
 #include "fullercode.h"
 
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 
 #define RADIUS     6371010.0
@@ -555,4 +556,167 @@ int fullerbingeodecoding(uint64_t bin, double *lat_deg, double *lon_deg) {
     *lon_deg = atan2(ctr.y, ctr.x) * (180.0 / M_PI);
 
     return 0;
+}
+
+int degminsecToDeg(const char *dms, double *lat_deg, double *lon_deg) {
+    int lat_d, lat_m, lat_s, lon_d, lon_m, lon_s, used = 0;
+    char lat_h, lon_h;
+
+    if (!dms || !lat_deg || !lon_deg || strlen(dms) != 22) return -1;
+    if (sscanf(dms, "%2d %2d %2d %c %3d %2d %2d %c%n",
+               &lat_d, &lat_m, &lat_s, &lat_h,
+               &lon_d, &lon_m, &lon_s, &lon_h, &used) != 8 || used != 22)
+        return -1;
+    if (lat_d < 0 || lat_m < 0 || lat_s < 0 ||
+        lon_d < 0 || lon_m < 0 || lon_s < 0 ||
+        lat_d > 90 || lon_d > 180 || lat_m > 59 || lon_m > 59 ||
+        lat_s > 59 || lon_s > 59 ||
+        (lat_h != 'N' && lat_h != 'S') ||
+        (lon_h != 'E' && lon_h != 'W') ||
+        (lat_d == 90 && (lat_m != 0 || lat_s != 0)) ||
+        (lon_d == 180 && (lon_m != 0 || lon_s != 0)))
+        return -1;
+
+    *lat_deg = lat_d + lat_m / 60.0 + lat_s / 3600.0;
+    *lon_deg = lon_d + lon_m / 60.0 + lon_s / 3600.0;
+    if (lat_h == 'S') *lat_deg = -*lat_deg;
+    if (lon_h == 'W') *lon_deg = -*lon_deg;
+    return 0;
+}
+
+int degTodegminsec(double lat_deg, double lon_deg, char out[23]) {
+    long lat_total, lon_total;
+    long lat_d, lat_m, lat_s, lon_d, lon_m, lon_s;
+
+    if (!out || !isfinite(lat_deg) || !isfinite(lon_deg) ||
+        lat_deg < -90.0 || lat_deg > 90.0 ||
+        lon_deg < -180.0 || lon_deg > 180.0) return -1;
+
+    lat_total = lround(fabs(lat_deg) * 3600.0);
+    lon_total = lround(fabs(lon_deg) * 3600.0);
+    if (lat_total > 90L * 3600) lat_total = 90L * 3600;
+    if (lon_total > 180L * 3600) lon_total = 180L * 3600;
+    lat_d = lat_total / 3600;
+    lat_m = (lat_total % 3600) / 60;
+    lat_s = lat_total % 60;
+    lon_d = lon_total / 3600;
+    lon_m = (lon_total % 3600) / 60;
+    lon_s = lon_total % 60;
+
+    snprintf(out, 23, "%02ld %02ld %02ld %c %03ld %02ld %02ld %c",
+             lat_d, lat_m, lat_s, lat_deg < 0.0 ? 'S' : 'N',
+             lon_d, lon_m, lon_s, lon_deg < 0.0 ? 'W' : 'E');
+    return 0;
+}
+
+uint64_t fuller48bitcoding(double lat_deg, double lon_deg) {
+    double lat, lon, cos_lat;
+    Vec3 q;
+    Face f;
+    uint64_t result;
+    int fi, i, bin_face = -1;
+
+    if (lat_deg < -90.0 || lat_deg > 90.0 ||
+        lon_deg < -180.0 || lon_deg > 180.0) return 0;
+    lat = lat_deg * (M_PI / 180.0);
+    lon = lon_deg * (M_PI / 180.0);
+    cos_lat = cos(lat);
+    q.x = cos_lat * cos(lon) * RADIUS;
+    q.y = cos_lat * sin(lon) * RADIUS;
+    q.z = sin(lat) * RADIUS;
+
+    fi = find_closest_ico_face(q, ICO_FACES);
+    for (i = 0; i < 20; i++)
+        if (BIN_FACE_ORDER[i] == ICO_FACES[fi].id) { bin_face = 0x10 + i; break; }
+    if (bin_face < 0) return 0;
+
+    result = (uint64_t)bin_face << 40;
+    f.verts[0] = ico_vert(ICO_FACES[fi].v[0]);
+    f.verts[1] = ico_vert(ICO_FACES[fi].v[1]);
+    f.verts[2] = ico_vert(ICO_FACES[fi].v[2]);
+    memcpy(f.stids, ICO_FACES[fi].stids, 17);
+    f.up = 1; f.depth = 0; f.ready = 0;
+
+    for (i = 0; i < 10; i++) {
+        int idx;
+        face_subdivide(&f);
+        idx = find_sub3d(&f, q);
+        result |= (uint64_t)idx << (36 - 4 * i);
+        f = make_subface(&f, idx);
+    }
+    return result;
+}
+
+int fuller48bitdecoding(uint64_t code, double *lat_deg, double *lon_deg) {
+    Face f;
+    Vec3 ctr;
+    double radius;
+    int face_byte, order_idx, fi = -1, i;
+
+    if (!lat_deg || !lon_deg || (code >> 48) != 0) return -1;
+    face_byte = (int)((code >> 40) & 0xff);
+    order_idx = face_byte - 0x10;
+    if (order_idx < 0 || order_idx >= 20) return -1;
+    for (i = 0; i < 20; i++)
+        if (ICO_FACES[i].id == BIN_FACE_ORDER[order_idx]) { fi = i; break; }
+    if (fi < 0) return -1;
+
+    f.verts[0] = ico_vert(ICO_FACES[fi].v[0]);
+    f.verts[1] = ico_vert(ICO_FACES[fi].v[1]);
+    f.verts[2] = ico_vert(ICO_FACES[fi].v[2]);
+    memcpy(f.stids, ICO_FACES[fi].stids, 17);
+    f.up = 1; f.depth = 0; f.ready = 0;
+    for (i = 0; i < 10; i++) {
+        int idx = (int)((code >> (36 - 4 * i)) & 0x0f);
+        face_subdivide(&f);
+        f = make_subface(&f, idx);
+    }
+    ctr = sph_center(f.verts[0], f.verts[1], f.verts[2]);
+    radius = sqrt(ctr.x*ctr.x + ctr.y*ctr.y + ctr.z*ctr.z);
+    *lat_deg = asin(ctr.z / radius) * (180.0 / M_PI);
+    *lon_deg = atan2(ctr.y, ctr.x) * (180.0 / M_PI);
+    return 0;
+}
+
+int binToB64(uint64_t code, char out[9]) {
+    static const char alphabet[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    int i;
+    if (!out || (code >> 48) != 0) return -1;
+    for (i = 0; i < 8; i++) out[i] = alphabet[(code >> (42 - 6 * i)) & 0x3f];
+    out[8] = '\0';
+    return 0;
+}
+
+int b64ToBin(const char b64[9], uint64_t *code) {
+    static const char alphabet[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    uint64_t value = 0;
+    int i;
+    if (!b64 || !code || strlen(b64) != 8) return -1;
+    for (i = 0; i < 8; i++) {
+        const char *p = strchr(alphabet, b64[i]);
+        if (!p) return -1;
+        value = (value << 6) | (uint64_t)(p - alphabet);
+    }
+    *code = value;
+    return 0;
+}
+
+int fullerB64coding(const char *dms, char out[9]) {
+    double lat, lon;
+    uint64_t code;
+    if (degminsecToDeg(dms, &lat, &lon) != 0) return -1;
+    code = fuller48bitcoding(lat, lon);
+    if (code == 0) return -1;
+    return binToB64(code, out);
+}
+
+int fullerB64decoding(const char *b64, char dms[23]) {
+    uint64_t code;
+    double lat_deg, lon_deg;
+    if (!dms) return -1;
+    if (b64ToBin(b64, &code) != 0) return -1;
+    if (fuller48bitdecoding(code, &lat_deg, &lon_deg) != 0) return -1;
+    return degTodegminsec(lat_deg, lon_deg, dms);
 }

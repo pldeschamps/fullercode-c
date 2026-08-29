@@ -67,6 +67,30 @@ static void run_bin_test(const char *label, double lat, double lon) {
     printf("lat-lat=%.9f mm, lon-lon=%.9f mm\n", (lat - dec_lat) * 111120000, (lon - dec_lon) * 111120000 * cos(lat * (3.14159265358979323846 / 180.0)));
 }
 
+static int run_b64_no_collision_test(int latitude) {
+    char dms[23], code[9];
+    int second, failures = 0;
+
+    for (second = 0; second < 30; second++) {
+        char decoded_dms[23];
+        snprintf(dms, sizeof dms, "%02d 00 00 N 034 12 %02d W", latitude, second);
+        if (fullerB64coding(dms, code) != 0 ||
+            fullerB64decoding(code, decoded_dms) != 0) {
+            printf("  latitude %d: ERROR for %s\n", latitude, dms);
+            failures++;
+            continue;
+        }
+        if (strcmp(dms, decoded_dms) != 0) {
+            printf("  latitude %d: FAIL %s -> %s -> %s\n",
+                   latitude, dms, code, decoded_dms);
+            failures++;
+        }
+    }
+    printf("  latitude %d deg: %s (30 longitudes successives)\n",
+           latitude, failures ? "ECHEC" : "OK");
+    return failures;
+}
+
 int main(void) {
     printf("=== fullercode geocoding tests ===\n\n");
 
@@ -113,6 +137,24 @@ int main(void) {
     run_bin_test("South pole (Lat+, Lon-)", -90.0, 0.0);
     run_bin_test("Null island (Lat+, Lon+)", 0.0, 0.0);
     run_bin_test("Antimeridian E (Lat+, Lon+)", 0.0, 180.0);
+
+    printf("\n=== Fuller 48 bits / Base64: test sans collision ===\n\n");
+    {
+        char sample[9], sample_dms[23];
+        if (fullerB64coding("79 58 59 N 034 12 34 W", sample) == 0 &&
+            fullerB64decoding(sample, sample_dms) == 0) {
+            printf("  exemple: 79 58 59 N 034 12 34 W -> %s -> %s\n",
+                   sample, sample_dms);
+        }
+    }
+    run_b64_no_collision_test(70);
+    run_b64_no_collision_test(75);
+    run_b64_no_collision_test(80);
+    run_b64_no_collision_test(81);
+    run_b64_no_collision_test(82);
+    run_b64_no_collision_test(83);
+    run_b64_no_collision_test(84);
+    run_b64_no_collision_test(85);
 
     /* Decode-only test of a known code */
     printf("\n=== decode only ===\n");
